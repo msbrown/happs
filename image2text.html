@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image to Text OCR</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 1.5rem;
+        }
+        .drop-zone {
+            border: 3px dashed #007bff;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            background: #fff;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .drop-zone:hover,
+        .drop-zone.drag-over {
+            background: #e8f4ff;
+            border-color: #0056b3;
+        }
+        .drop-zone p {
+            margin: 0 0 15px 0;
+            color: #666;
+        }
+        .file-input {
+            display: none;
+        }
+        .upload-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        .upload-btn:hover {
+            background: #0056b3;
+        }
+        .preview {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .preview img {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            display: none;
+        }
+        .status.visible {
+            display: block;
+        }
+        .status.processing {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status.done {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .output {
+            margin-top: 20px;
+        }
+        .output h2 {
+            font-size: 1.1rem;
+            color: #333;
+        }
+        .output textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+            resize: vertical;
+        }
+    </style>
+</head>
+<body>
+    <h1>📷 Image to Text</h1>
+    
+    <div class="drop-zone" id="dropZone">
+        <p>Drag & drop an image here</p>
+        <p>— or —</p>
+        <button class="upload-btn" id="uploadBtn">Choose File</button>
+        <input type="file" class="file-input" id="fileInput" accept="image/*">
+    </div>
+    
+    <div class="preview" id="preview"></div>
+    
+    <div class="status" id="status"></div>
+    
+    <div class="output">
+        <h2>Extracted Text:</h2>
+        <textarea id="outputText" placeholder="Text will appear here..." ></textarea>
+        <button class="upload-btn" id="copyText">Copy Text</button>
+        
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const preview = document.getElementById('preview');
+        const status = document.getElementById('status');
+        const outputText = document.getElementById('outputText');
+        const copyText = document.getElementById('copyText');
+
+        // Click to upload
+        uploadBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            fileInput.click();
+        });
+        
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                processFile(e.target.files[0]);
+            }
+        });
+
+        // Drag and drop
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            if (e.dataTransfer.files.length > 0) {
+                processFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        function showStatus(message, type) {
+            status.textContent = message;
+            status.className = 'status visible ' + type;
+        }
+
+        async function processFile(file) {
+            if (!file.type.startsWith('image/')) {
+                showStatus('Please select an image file.', 'error');
+                return;
+            }
+
+            // Show preview
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(file);
+            preview.innerHTML = '';
+            preview.appendChild(img);
+
+            // Run OCR
+            showStatus('Processing... This may take a moment.', 'processing');
+            outputText.value = '';
+
+            try {
+                const result = await Tesseract.recognize(file, 'eng', {
+                    logger: (m) => {
+                        if (m.status === 'recognizing text') {
+                            const pct = Math.round(m.progress * 100);
+                            showStatus(`Recognizing text... ${pct}%`, 'processing');
+                        }
+                    }
+                });
+                outputText.value = result.data.text;
+                showStatus('Done!', 'done');
+            } catch (err) {
+                showStatus('Error: ' + err.message, 'error');
+            }
+        }
+        // Trim and copy text function
+        copyText.addEventListener('click', async () => {
+        const trimmedText = outputText.value.trim();
+        await navigator.clipboard.writeText(trimmedText);
+        });
+    </script>
+</body>
+</html>
