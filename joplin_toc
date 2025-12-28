@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Joplin TOC Generator</title>
+  <style>
+    body { 
+      font-family: sans-serif; 
+      max-width: 1200px; 
+      margin: 0 auto; 
+      padding: 20px; 
+    }
+    textarea, pre { 
+      width: 100%; 
+      font-family: monospace; 
+      font-size: 13px;
+    }
+    textarea {
+      border: 2px solid #ddd;
+      border-radius: 4px;
+      padding: 10px;
+    }
+    pre { 
+      background: #f4f4f4; 
+      padding: 15px; 
+      white-space: pre-wrap;
+      border-radius: 4px;
+      border: 2px solid #ddd;
+    }
+    #preview {
+      background: white;
+      padding: 15px;
+      border-radius: 4px;
+      border: 2px solid #ddd;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.6;
+      display: none;
+    }
+    #preview h1, #preview h2, #preview h3, #preview h4, #preview h5 {
+      margin-top: 1.5em;
+      margin-bottom: 0.5em;
+    }
+    #preview ul { padding-left: 2em; }
+    #preview a { color: #0066cc; text-decoration: none; }
+    #preview a:hover { text-decoration: underline; }
+    #preview hr { border: 1px solid #ddd; margin: 2em 0; }
+    #preview mark {
+      background-color: #ffeb3b;
+      padding: 2px 4px;
+    }
+    .mermaid {
+      text-align: center;
+      margin: 20px 0;
+    }
+    button { 
+      margin: 10px 5px 10px 0; 
+      padding: 10px 20px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover { background: #0056b3; }
+    button#copyBtn { background: #28a745; }
+    button#copyBtn:hover { background: #218838; }
+    button#previewBtn { background: #6c757d; }
+    button#previewBtn:hover { background: #5a6268; }
+    h2 { color: #333; }
+    .header-levels {
+      margin: 10px 0;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 4px;
+    }
+    .header-levels label {
+      margin-right: 15px;
+      cursor: pointer;
+    }
+
+    .notes {
+        margin-top: 40px;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 4px;
+        border-left: 4px solid #007bff;
+        font-size: 12px;
+    }
+    .notes h3 {
+        margin-top: 0;
+        color: #333;
+        font-size: 14px;
+    }
+    .notes ul {
+        margin: 10px 0;
+        padding-left: 20px;
+    }
+    .notes li {
+        margin: 5px 0;
+        color: #555;
+    }
+
+  </style>
+</head>
+<body>
+  <h2>Joplin TOC Generator</h2>
+  
+  <div class="header-levels">
+    <strong>Include header levels:</strong>
+    <label><input type="checkbox" id="h1" checked> H1</label>
+    <label><input type="checkbox" id="h2" checked> H2</label>
+    <label><input type="checkbox" id="h3" checked> H3</label>
+    <label><input type="checkbox" id="h4"> H4</label>
+    <label><input type="checkbox" id="h5"> H5</label>
+  </div>
+  
+  <textarea id="input" rows="15" placeholder="Paste your Joplin markdown here..."></textarea>
+  <div>
+    <button onclick="generate()">Generate TOC</button>
+    <button onclick="copyOutput()" id="copyBtn" style="display:none;">Copy Output</button>
+    <button onclick="togglePreview()" id="previewBtn" style="display:none;">Show Preview</button>
+  </div>
+  <pre id="output"></pre>
+  <div id="preview"></div>
+
+  <div class="notes">
+    <h3>Notes</h3>
+    <ul>
+      <li>Skips first line (assumes it is the title)</li>
+      <li>Defaults to header 1 to 3 (# header 1 .... ### header 3) but selectable to h5</li>
+      <li>Joplin preview renders only ==highlight== mermaid ticks (`) and check boxes. Not images. </li>
+    </ul>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+    window.mermaid = mermaid;
+  </script>
+  <script>
+    let isPreviewMode = false;
+    let generatedOutput = '';
+
+    function parseHeaders(markdown, skipFirst = false) {
+      const lines = markdown.split('\n');
+      const headers = [];
+      let foundFirst = false;
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const match = line.match(/^(#{1,5})\s+(.+)$/);
+        
+        if (match) {
+          if (skipFirst && !foundFirst) {
+            foundFirst = true;
+            continue;
+          }
+          
+          const level = match[1].length;
+          let text = match[2].trim();
+          
+          text = text
+            .replace(/\*\*/g, '')
+            .replace(/\*/g, '')
+            .replace(/==/g, '')
+            .replace(/<[^>]+>/g, '')
+            .trim();
+          
+          headers.push({
+            level: level,
+            text: text,
+            lineIndex: i
+          });
+        }
+      }
+      
+      return headers;
+    }
+
+    function createSlug(text) {
+      return text
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .trim();
+    }
+
+    function getSelectedLevels() {
+      const levels = [];
+      for (let i = 1; i <= 5; i++) {
+        if (document.getElementById(`h${i}`).checked) {
+          levels.push(i);
+        }
+      }
+      return levels;
+    }
+
+    function buildTOC(headers, selectedLevels) {
+      let toc = '<a id="toc"></a>\n';
+      
+      const filteredHeaders = headers.filter(h => selectedLevels.includes(h.level));
+      
+      filteredHeaders.forEach(header => {
+        const slug = createSlug(header.text);
+        const indent = '  '.repeat(header.level - 1);
+        toc += `${indent}- [${header.text}](#${slug})\n`;
+      });
+      
+      return toc;
+    }
+
+    function addAnchorsToMarkdown(markdown, headers, skipFirstLine = false) {
+      const lines = markdown.split('\n');
+      let firstHeaderIndex = -1;
+      
+      if (skipFirstLine) {
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (line && line.match(/^#{1,5}\s+/)) {
+            firstHeaderIndex = i;
+            break;
+          }
+        }
+      }
+      
+      for (let i = headers.length - 1; i >= 0; i--) {
+        const header = headers[i];
+        
+        if (header.lineIndex === firstHeaderIndex) {
+          continue;
+        }
+        
+        const slug = createSlug(header.text);
+        const originalLine = lines[header.lineIndex];
+        
+        lines[header.lineIndex] = `<a id="${slug}"></a>\n${originalLine}`;
+      }
+      
+      return lines.join('\n');
+    }
+
+    function copyOutput() {
+      navigator.clipboard.writeText(generatedOutput).then(() => {
+        const btn = document.getElementById('copyBtn');
+        const originalText = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = originalText, 2000);
+      });
+    }
+
+    async function togglePreview() {
+      const outputEl = document.getElementById('output');
+      const previewEl = document.getElementById('preview');
+      const btn = document.getElementById('previewBtn');
+      
+      isPreviewMode = !isPreviewMode;
+      
+      if (isPreviewMode) {
+        outputEl.style.display = 'none';
+        previewEl.style.display = 'block';
+        
+        // Pre-process markdown to handle Joplin's ==highlight== syntax
+        let processedMd = generatedOutput.replace(/==([^=]+)==/g, '<mark>$1</mark>');
+        
+        // Convert mermaid code blocks to divs that mermaid can render
+        let mermaidCounter = 0;
+        processedMd = processedMd.replace(/```mermaid\n([\s\S]*?)```/g, (match, code) => {
+          const id = `mermaid-${mermaidCounter++}`;
+          return `<div class="mermaid" id="${id}">\n${code}\n</div>`;
+        });
+        
+        previewEl.innerHTML = marked.parse(processedMd);
+        
+        // Render mermaid diagrams
+        if (window.mermaid) {
+          await window.mermaid.run({
+            querySelector: '.mermaid'
+          });
+        }
+        
+        btn.textContent = 'Show Markdown';
+      } else {
+        outputEl.style.display = 'block';
+        previewEl.style.display = 'none';
+        btn.textContent = 'Show Preview';
+      }
+    }
+
+    function generate() {
+      const md = document.getElementById('input').value;
+      const selectedLevels = getSelectedLevels();
+      
+      if (selectedLevels.length === 0) {
+        alert('Please select at least one header level');
+        return;
+      }
+      
+      const lines = md.split('\n');
+      
+      // First line is ALWAYS the title
+      const titleLine = lines[0];
+      
+      // Find the first header AFTER line 0
+      let firstContentHeaderIndex = -1;
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line && line.match(/^#{1,5}\s+/)) {
+          firstContentHeaderIndex = i;
+          break;
+        }
+      }
+      
+      // Everything from line 1 to before first header is preamble
+      let preambleContent = '';
+      if (firstContentHeaderIndex > 1) {
+        preambleContent = lines.slice(1, firstContentHeaderIndex).join('\n').trim();
+      } else if (firstContentHeaderIndex === -1 && lines.length > 1) {
+        // No headers found, everything after title is preamble
+        preambleContent = lines.slice(1).join('\n').trim();
+      }
+      
+      // Parse ALL headers from line 1 onward (don't skip any for TOC)
+      const allHeadersAfterTitle = parseHeaders(lines.slice(1).join('\n'), false);
+      
+      const toc = buildTOC(allHeadersAfterTitle, selectedLevels);
+      
+      // Add anchors to all headers after line 0
+      const mdWithAnchors = addAnchorsToMarkdown(md, allHeadersAfterTitle, false);
+      
+      let output;
+      const anchoredLines = mdWithAnchors.split('\n');
+      
+      // Get content from first header onward (with anchors added)
+      let restContent = '';
+      if (firstContentHeaderIndex >= 0) {
+        restContent = anchoredLines.slice(firstContentHeaderIndex).join('\n');
+      }
+      
+      if (preambleContent) {
+        output = `${titleLine}\n\n${preambleContent}\n\n${toc}\n---\n\n${restContent}\n\n---\n[↑ Back to top](#toc)`;
+      } else {
+        output = `${titleLine}\n\n${toc}\n---\n\n${restContent}\n\n---\n[↑ Back to top](#toc)`;
+      }
+      
+      generatedOutput = output;
+      document.getElementById('output').textContent = output;
+      document.getElementById('output').style.display = 'block';
+      document.getElementById('preview').style.display = 'none';
+      document.getElementById('copyBtn').style.display = 'inline-block';
+      document.getElementById('previewBtn').style.display = 'inline-block';
+      document.getElementById('previewBtn').textContent = 'Show Preview';
+      isPreviewMode = false;
+    }
+  </script>
+</body>
+</html>
